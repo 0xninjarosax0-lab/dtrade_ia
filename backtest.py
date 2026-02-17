@@ -1,5 +1,5 @@
-"""backtesting.py integration layer for signal-based WIN strategy."""
-
+"""backtesting.py integration layer for signal-based WIN strategy. """
+"""lembrar de traduzir os comentários """
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -86,4 +86,4 @@ def run_backtesting_py(
     equity_curve = stats.get("_equity_curve", pd.DataFrame())
     trades = stats.get("_trades", pd.DataFrame())
 
-    return BacktestPyResult(stats=stats, equity_curve=equity_curve, trades=trades)
+    return BacktestPyResult(stats=stats, equity_curve=equity_curve, trades=trades) 
