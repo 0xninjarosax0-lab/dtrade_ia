@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from backtest import run_backtesting_py
 from data import DataConfig, load_data
@@ -34,6 +35,24 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help="Use FractionalBacktest to avoid whole-unit cash constraints",
     )
+    parser.add_argument(
+        "--show-last-trades",
+        type=int,
+        default=10,
+        help="How many last trades to print in terminal summary",
+    )
+    parser.add_argument(
+        "--export-trades-csv",
+        type=str,
+        default=None,
+        help="Optional path to export executed trades as CSV",
+    )
+    parser.add_argument(
+        "--export-equity-csv",
+        type=str,
+        default=None,
+        help="Optional path to export equity curve as CSV",
+    )
     return parser.parse_args()
 
 
@@ -53,6 +72,40 @@ def _to_backtesting_schema(df):
     out = out.set_index("timestamp")
     return out[["Open", "High", "Low", "Close", "Volume", "signal"]]
 
+
+
+
+def _print_trade_summary(trades, limit: int) -> None:
+    if trades is None or trades.empty:
+        print("No trades were executed by backtesting.py in this run.")
+        return
+
+    display_cols = [
+        col
+        for col in [
+            "EntryTime",
+            "ExitTime",
+            "Size",
+            "EntryPrice",
+            "ExitPrice",
+            "PnL",
+            "ReturnPct",
+            "Duration",
+        ]
+        if col in trades.columns
+    ]
+    n_rows = max(1, int(limit))
+    print(f"\nLast {min(n_rows, len(trades))} trades:")
+    print(trades[display_cols].tail(n_rows).to_string(index=False))
+
+
+def _export_if_requested(df, output_path: str | None, label: str) -> None:
+    if not output_path:
+        return
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(out, index=False)
+    print(f"Saved {label} to: {out}")
 
 def main() -> None:
     args = parse_args()
@@ -113,6 +166,12 @@ def main() -> None:
     print(f"Backtesting.py Return [%]: {bt_result.stats.get('Return [%]')}")
     print(f"Backtesting.py Max. Drawdown [%]: {bt_result.stats.get('Max. Drawdown [%]')}")
     print(f"Backtesting.py # Trades: {bt_result.stats.get('# Trades')}")
+
+    _print_trade_summary(bt_result.trades, limit=args.show_last_trades)
+
+    _export_if_requested(bt_result.trades, args.export_trades_csv, label="trades")
+    equity_curve = bt_result.equity_curve.reset_index(drop=False)
+    _export_if_requested(equity_curve, args.export_equity_csv, label="equity curve")
 
 
 if __name__ == "__main__":
