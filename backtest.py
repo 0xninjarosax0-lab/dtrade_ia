@@ -49,6 +49,10 @@ def run_backtesting_py(
     Backtest, Strategy, FractionalBacktest = _require_backtesting_py()
 
     class SignalStrategy(Strategy):
+        def init(self) -> None:
+            """Required by backtesting.py Strategy abstract interface."""
+            return None
+
         def next(self) -> None:
             sig = int(self.data.signal[-1])
 
