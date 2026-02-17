@@ -1,5 +1,5 @@
-"""backtesting.py integration layer for signal-based WIN strategy. """
-"""lembrar de traduzir os comentários """
+"""backtesting.py integration layer for signal-based WIN strategy."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
