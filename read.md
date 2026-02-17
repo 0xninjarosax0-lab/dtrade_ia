@@ -29,8 +29,6 @@ pip install pandas numpy scikit-learn backtesting
 
 ## CSV esperado (mínimo)
 
-Se quiser usar dados reais locais:
-
 Colunas obrigatórias:
 
 - `timestamp`
@@ -40,12 +38,6 @@ Colunas obrigatórias:
 - `close`
 - `volume`
 
-Exemplo:
-
-```csv
-timestamp,open,high,low,close,volume
-2024-01-02 09:00:00,129000,129120,128950,129080,350
-```
 Colunas opcionais (se ausentes, o pipeline preenche):
 
 - `symbol`
@@ -65,17 +57,18 @@ python main.py
 ```bash
 python main.py --csv /caminho/para/win_5m.csv
 ```
+
 ## Parâmetros úteis
 
 ```bash
-
 python main.py \
   --horizon-bars 3 \
   --cost-buffer-bps 2.0 \
   --threshold-buy 0.55 \
   --threshold-sell 0.45 \
   --max-trades-day 8 \
-  --commission 0.0002
+  --commission 0.0002 \
+  --use-fractional-backtest
 ```
 
 ## Backtesting.py
@@ -84,4 +77,13 @@ O pipeline já executa via `backtesting.py`. Se quiser testar regras diferentes 
 reaproveite o dataframe no formato:
 
 - `Open`, `High`, `Low`, `Close`, `Volume`, `signal`
+
 onde `signal` = `1` (long), `-1` (short), `0` (flat).
+
+
+Se aparecer o warning sobre preço maior que o caixa inicial ("Some prices are larger than initial cash value"),
+use `--use-fractional-backtest` (padrão) ou aumente `--cash`. Para desativar o modo fracionário:
+
+```bash
+python main.py --no-use-fractional-backtest --cash 500000
+```

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import pandas as pd
 
@@ -14,14 +15,15 @@ class BacktestPyResult:
     trades: pd.DataFrame
 
 
-def _require_backtesting_py() -> tuple[type, type]:
+def _require_backtesting_py() -> tuple[type, type, type | None]:
     try:
         from backtesting import Backtest, Strategy  # type: ignore
+        from backtesting.lib import FractionalBacktest  # type: ignore
     except ImportError as exc:  # pragma: no cover - runtime dependency
         raise ImportError(
             "Dependency 'backtesting' not found. Install with: pip install backtesting"
         ) from exc
-    return Backtest, Strategy
+    return Backtest, Strategy, FractionalBacktest
 
 
 def run_backtesting_py(
@@ -29,6 +31,7 @@ def run_backtesting_py(
     cash: float = 100_000,
     commission: float = 0.0002,
     exclusive_orders: bool = True,
+    use_fractional: bool = True,
 ) -> BacktestPyResult:
     """Run signal-based backtest using backtesting.py.
 
@@ -43,7 +46,7 @@ def run_backtesting_py(
 
     bt_df = df.copy()
 
-    Backtest, Strategy = _require_backtesting_py()
+    Backtest, Strategy, FractionalBacktest = _require_backtesting_py()
 
     class SignalStrategy(Strategy):
         def next(self) -> None:
@@ -63,7 +66,11 @@ def run_backtesting_py(
                 if self.position:
                     self.position.close()
 
-    bt = Backtest(
+    backtest_cls: type[Any] = Backtest
+    if use_fractional and FractionalBacktest is not None:
+        backtest_cls = FractionalBacktest
+
+    bt = backtest_cls(
         bt_df,
         SignalStrategy,
         cash=cash,

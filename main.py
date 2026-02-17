@@ -28,6 +28,12 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--cash", type=float, default=100_000, help="Initial cash for backtesting.py")
     parser.add_argument("--commission", type=float, default=0.0002, help="Commission ratio per trade")
+    parser.add_argument(
+        "--use-fractional-backtest",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use FractionalBacktest to avoid whole-unit cash constraints",
+    )
     return parser.parse_args()
 
 
@@ -95,6 +101,7 @@ def main() -> None:
         cash=args.cash,
         commission=args.commission,
         exclusive_orders=True,
+        use_fractional=args.use_fractional_backtest,
     )
 
     print("=== WIN 5m Pipeline (backtesting.py) ===")
