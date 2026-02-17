@@ -1,11 +1,4 @@
-"""Feature engineering for WIN 5m MVP.
-
-Indicators included:
-- SMA (short/long)
-- RSI
-- ATR
-- MACD (line, signal, histogram)
-"""
+"""Feature and label engineering for WIN 5m supervised pipeline."""
 
 from __future__ import annotations
 
@@ -37,47 +30,91 @@ def _atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
 
 
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Create technical features and binary target for next-bar direction."""
+    """Build anti-leakage feature set using only information known up to t."""
     data = df.copy().sort_values("timestamp").reset_index(drop=True)
 
-    data["ret_1"] = data["close"].pct_change()
-
-    data["sma_10"] = data["close"].rolling(10).mean()
-    data["sma_30"] = data["close"].rolling(30).mean()
-    data["sma_ratio"] = data["sma_10"] / data["sma_30"] - 1.0
+    for lag in [1, 2, 3, 6, 12]:
+        data[f"ret_{lag}"] = data["close"].pct_change(lag)
 
     data["rsi_14"] = _rsi(data["close"], 14)
     data["atr_14"] = _atr(data, 14)
-    data["atr_norm"] = data["atr_14"] / data["close"]
+    data["atr_14_norm"] = data["atr_14"] / data["close"]
 
-    ema_fast = data["close"].ewm(span=12, adjust=False).mean()
-    ema_slow = data["close"].ewm(span=26, adjust=False).mean()
-    data["macd"] = ema_fast - ema_slow
-    data["macd_signal"] = data["macd"].ewm(span=9, adjust=False).mean()
-    data["macd_hist"] = data["macd"] - data["macd_signal"]
+    data["range_norm"] = (data["high"] - data["low"]) / data["close"]
 
-    data["vol_chg"] = data["volume"].pct_change().replace([np.inf, -np.inf], np.nan)
-    data["hl_range"] = (data["high"] - data["low"]) / data["close"]
+    typical_price = (data["high"] + data["low"] + data["close"]) / 3.0
+    cum_tpv = (typical_price * data["volume"]).groupby(data["session_id"]).cumsum()
+    cum_vol = data["volume"].groupby(data["session_id"]).cumsum().replace(0, np.nan)
+    data["vwap"] = cum_tpv / cum_vol
+    data["vwap_distance"] = (data["close"] / data["vwap"]) - 1.0
 
-    # Target: 1 = buy, 0 = sell based on next bar close return
-    future_ret = data["close"].shift(-1) / data["close"] - 1.0
-    data["target"] = (future_ret > 0).astype(int)
+    data["hour"] = data["timestamp"].dt.hour
+    data["minute"] = data["timestamp"].dt.minute
+    minute_of_day = data["hour"] * 60 + data["minute"]
+    data["minute_sin"] = np.sin(2 * np.pi * minute_of_day / (24 * 60))
+    data["minute_cos"] = np.cos(2 * np.pi * minute_of_day / (24 * 60))
 
-    # Optional human-readable signal label.
-    data["signal_label"] = np.where(data["target"] == 1, "buy", "sell")
+    volume_mean = data.groupby(["hour", "minute"])["volume"].transform("mean")
+    volume_std = data.groupby(["hour", "minute"])["volume"].transform("std").replace(0, np.nan)
+    data["vol_zscore_hora"] = (data["volume"] - volume_mean) / volume_std
+
+    data["trend_strength"] = (data["close"].rolling(10).mean() / data["close"].rolling(30).mean()) - 1.0
+
+    rolling_vol = data["ret_1"].rolling(30).std()
+    q1 = rolling_vol.rolling(200).quantile(0.33)
+    q2 = rolling_vol.rolling(200).quantile(0.66)
+    data["regime_vol"] = np.select(
+        [rolling_vol <= q1, rolling_vol <= q2],
+        [0, 1],
+        default=2,
+    )
+
+    data["is_macro_window"] = False
+    data.loc[(data["hour"] == 10) & (data["minute"].between(0, 15)), "is_macro_window"] = True
+    data.loc[(data["hour"] == 14) & (data["minute"].between(0, 15)), "is_macro_window"] = True
 
     return data
+
+
+def build_labels(
+    df: pd.DataFrame,
+    horizon_bars: int = 3,
+    cost_buffer_bps: float = 2.0,
+) -> pd.DataFrame:
+    """Build binary and ternary labels for t+h horizon with cost buffer."""
+    out = df[["timestamp", "symbol", "close"]].copy()
+    out["horizon_bars"] = horizon_bars
+
+    future_return = df["close"].shift(-horizon_bars) / df["close"] - 1.0
+    out["future_return_pts"] = df["close"] * future_return
+
+    threshold = cost_buffer_bps / 10_000.0
+    out["label_bin"] = (future_return > threshold).astype(int)
+
+    out["label_tri"] = np.select(
+        [future_return > threshold, future_return < -threshold],
+        [1, -1],
+        default=0,
+    )
+
+    return out
 
 
 def get_feature_columns() -> list[str]:
     return [
         "ret_1",
-        "sma_ratio",
+        "ret_2",
+        "ret_3",
+        "ret_6",
+        "ret_12",
+        "atr_14_norm",
+        "range_norm",
+        "vwap_distance",
+        "vol_zscore_hora",
+        "trend_strength",
+        "regime_vol",
+        "minute_sin",
+        "minute_cos",
         "rsi_14",
-        "atr_norm",
-        "macd",
-        "macd_signal",
-        "macd_hist",
-        "vol_chg",
-        "hl_range",
+        "is_macro_window",
     ]

@@ -1,63 +1,78 @@
-"""Simple backtest engine for classification-based buy/sell signals."""
+"""backtesting.py integration layer for signal-based WIN strategy."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-import numpy as np
 import pandas as pd
 
 
 @dataclass
-class BacktestResult:
-    accuracy: float
-    cumulative_return: float
-    max_drawdown: float
-    equity_curve: pd.Series
-    report_df: pd.DataFrame
+class BacktestPyResult:
+    stats: pd.Series
+    equity_curve: pd.DataFrame
+    trades: pd.DataFrame
 
 
-def max_drawdown(equity: pd.Series) -> float:
-    running_max = equity.cummax()
-    drawdown = equity / running_max - 1.0
-    return float(drawdown.min())
+def _require_backtesting_py() -> tuple[type, type]:
+    try:
+        from backtesting import Backtest, Strategy  # type: ignore
+    except ImportError as exc:  # pragma: no cover - runtime dependency
+        raise ImportError(
+            "Dependency 'backtesting' not found. Install with: pip install backtesting"
+        ) from exc
+    return Backtest, Strategy
 
 
-def run_backtest(
-    test_df: pd.DataFrame,
-    y_pred: np.ndarray,
-    trade_cost_bps: float = 1.0,
-) -> BacktestResult:
-    """Backtest strategy from model predictions.
+def run_backtesting_py(
+    df: pd.DataFrame,
+    cash: float = 100_000,
+    commission: float = 0.0002,
+    exclusive_orders: bool = True,
+) -> BacktestPyResult:
+    """Run signal-based backtest using backtesting.py.
 
-    - y_pred = 1 => long (+1)
-    - y_pred = 0 => short (-1)
+    Required columns:
+    - Open, High, Low, Close, Volume
+    - signal (1 long, -1 short, 0 flat)
     """
-    df = test_df.copy().reset_index(drop=True)
-    df = df.iloc[: len(y_pred)].copy()
+    required_cols = {"Open", "High", "Low", "Close", "Volume", "signal"}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns for backtesting.py: {sorted(missing)}")
 
-    df["pred"] = y_pred
-    df["position"] = np.where(df["pred"] == 1, 1, -1)
+    bt_df = df.copy()
 
-    df["asset_ret"] = df["close"].pct_change().fillna(0.0)
-    df["turnover"] = df["position"].diff().abs().fillna(0.0)
+    Backtest, Strategy = _require_backtesting_py()
 
-    # Trade cost in bps per position change unit.
-    cost = (trade_cost_bps / 10_000.0) * df["turnover"]
+    class SignalStrategy(Strategy):
+        def next(self) -> None:
+            sig = int(self.data.signal[-1])
 
-    # Use previous bar position to avoid lookahead in bar return.
-    df["strategy_ret"] = df["position"].shift(1).fillna(0) * df["asset_ret"] - cost
+            if sig == 1:
+                if self.position.is_short:
+                    self.position.close()
+                if not self.position:
+                    self.buy()
+            elif sig == -1:
+                if self.position.is_long:
+                    self.position.close()
+                if not self.position:
+                    self.sell()
+            else:
+                if self.position:
+                    self.position.close()
 
-    df["equity"] = (1.0 + df["strategy_ret"]).cumprod()
-
-    accuracy = float((df["pred"] == df["target"]).mean())
-    cumulative_return = float(df["equity"].iloc[-1] - 1.0)
-    mdd = max_drawdown(df["equity"])
-
-    return BacktestResult(
-        accuracy=accuracy,
-        cumulative_return=cumulative_return,
-        max_drawdown=mdd,
-        equity_curve=df["equity"],
-        report_df=df,
+    bt = Backtest(
+        bt_df,
+        SignalStrategy,
+        cash=cash,
+        commission=commission,
+        exclusive_orders=exclusive_orders,
     )
+    stats = bt.run()
+
+    equity_curve = stats.get("_equity_curve", pd.DataFrame())
+    trades = stats.get("_trades", pd.DataFrame())
+
+    return BacktestPyResult(stats=stats, equity_curve=equity_curve, trades=trades)

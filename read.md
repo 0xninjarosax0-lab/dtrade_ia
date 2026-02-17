@@ -1,30 +1,37 @@
-# MVP — Agente de IA para WIN (5m)
+# Pipeline Profissional — Agente de IA para WIN (5m)
 
-Este repositório contém a primeira versão funcional (MVP) para pesquisa de um agente de IA de day trade no mini índice WIN (timeframe 5 minutos), sem integração com corretora.
+Este repositório foi ajustado para um pipeline mais aderente ao plano técnico:
+
+- dados com esquema mínimo `bars_5m`;
+- separação explícita entre **features** e **labels**;
+- treino supervisionado com split temporal;
+- contrato de sinal (`action/confidence/size_multiplier/reason_code`);
+- execução de backtest com **backtesting.py**.
 
 ## Estrutura
 
-- `data.py`: carrega CSV real ou gera dados mock realistas de candles 5m.
-- `features.py`: engenharia de features técnicas (SMA, RSI, ATR, MACD).
-- `model.py`: treino com `LogisticRegression` e validação temporal com `TimeSeriesSplit`.
-- `backtest.py`: backtest simples de sinais buy/sell com custo de transação.
-- `main.py`: pipeline ponta a ponta (dados -> features -> treino -> backtest -> métricas).
+- `data.py`: carrega CSV ou gera mock e normaliza para o esquema mínimo de barras.
+- `features.py`: engenharia de features anti-leakage e geração de labels (`label_bin`, `label_tri`).
+- `model.py`: treino com `LogisticRegression` + `TimeSeriesSplit` + decisão por probabilidade.
+- `signal_engine.py`: contrato de decisão e guardrails de risco intradiário.
+- `backtest.py`: adaptador para executar o backtest no `backtesting.py`.
+- `main.py`: pipeline ponta a ponta.
 
 ## Requisitos
 
 - Python 3.10+
 
-Instalação:
+Instalação mínima:
 
 ```bash
-pip install pandas numpy scikit-learn
+pip install pandas numpy scikit-learn backtesting
 ```
 
-## Formato do CSV (opcional)
+## CSV esperado (mínimo)
 
 Se quiser usar dados reais locais:
 
-Colunas obrigatórias (case-insensitive):
+Colunas obrigatórias:
 
 - `timestamp`
 - `open`
@@ -39,35 +46,42 @@ Exemplo:
 timestamp,open,high,low,close,volume
 2024-01-02 09:00:00,129000,129120,128950,129080,350
 ```
+Colunas opcionais (se ausentes, o pipeline preenche):
+
+- `symbol`
+- `session_id`
+- `is_roll_day`
 
 ## Como rodar
 
-### 1) Com dados mock
+### 1) Dados mock
 
 ```bash
 python main.py
 ```
 
-### 2) Com CSV real
+### 2) CSV real
 
 ```bash
 python main.py --csv /caminho/para/win_5m.csv
 ```
-
-Parâmetros úteis:
+## Parâmetros úteis
 
 ```bash
-python main.py --splits 6 --cost-bps 1.5 --start 2023-01-02 --end 2024-12-31
+
+python main.py \
+  --horizon-bars 3 \
+  --cost-buffer-bps 2.0 \
+  --threshold-buy 0.55 \
+  --threshold-sell 0.45 \
+  --max-trades-day 8 \
+  --commission 0.0002
 ```
 
-## Métricas do MVP
+## Backtesting.py
 
-- Acurácia em teste temporal (último fold do `TimeSeriesSplit`).
-- Retorno cumulativo do backtest.
-- Drawdown máximo do backtest.
+O pipeline já executa via `backtesting.py`. Se quiser testar regras diferentes no site/projeto oficial,
+reaproveite o dataframe no formato:
 
-## Observações
-
-- Este MVP é para pesquisa/validação inicial.
-- Não inclui execução em corretora.
-- Próximos passos naturais: meta-labeling, walk-forward mais robusto, e risk engine mais detalhado.
+- `Open`, `High`, `Low`, `Close`, `Volume`, `signal`
+onde `signal` = `1` (long), `-1` (short), `0` (flat).
